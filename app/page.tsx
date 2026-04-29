@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Flame, Send, RefreshCw, Lightbulb, AlertCircle, Settings, Key, Cpu } from "lucide-react";
+import { Flame, Send, RefreshCw, Lightbulb, AlertCircle, Settings, Key, Cpu, FileUp, X } from "lucide-react";
 
 type Status = "idle" | "loading" | "done" | "error";
 
@@ -41,6 +41,12 @@ export default function Home() {
   const [result, setResult] = useState<RoastResult | null>(null);
   const [error, setError] = useState("");
   const [loadingMsg, setLoadingMsg] = useState(LOADING_MESSAGES[0]);
+
+  // File upload state
+  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+  const [parseStatus, setParseStatus] = useState<"idle" | "parsing" | "done" | "error">("idle");
+  const [parseError, setParseError] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Settings state
   const [provider, setProvider] = useState("gemini");
@@ -109,11 +115,48 @@ export default function Home() {
     }
   };
 
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setUploadedFile(file);
+    setParseStatus("parsing");
+    setParseError("");
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    try {
+      const res = await fetch("/api/parse-file", { method: "POST", body: formData });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to parse file");
+      setCvText(data.text);
+      setParseStatus("done");
+    } catch (err) {
+      setParseStatus("error");
+      setParseError(err instanceof Error ? err.message : "Failed to parse file");
+      setUploadedFile(null);
+    }
+
+    // Reset input so the same file can be re-selected
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const clearFile = () => {
+    setUploadedFile(null);
+    setParseStatus("idle");
+    setParseError("");
+    setCvText("");
+  };
+
   const handleReset = () => {
     setStatus("idle");
     setResult(null);
     setError("");
     setCvText("");
+    setUploadedFile(null);
+    setParseStatus("idle");
+    setParseError("");
   };
 
   const isInputShown = status === "idle" || status === "error";
@@ -239,10 +282,48 @@ export default function Home() {
                 </motion.div>
               )}
 
+              {/* File Upload */}
+              <div>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".pdf,.docx"
+                  onChange={handleFileUpload}
+                  className="hidden"
+                />
+                {uploadedFile && parseStatus === "done" ? (
+                  <div className="flex items-center justify-between px-4 py-3 rounded-xl bg-zinc-900 border border-orange-500/30 text-sm">
+                    <div className="flex items-center gap-2 text-zinc-400 truncate">
+                      <FileUp className="w-4 h-4 text-orange-400 shrink-0" />
+                      <span className="truncate">{uploadedFile.name}</span>
+                      <span className="text-zinc-600 shrink-0">· {cvText.length} chars</span>
+                    </div>
+                    <button onClick={clearFile} className="ml-2 text-zinc-600 hover:text-zinc-400 transition-colors shrink-0">
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={parseStatus === "parsing"}
+                    className="w-full py-3 rounded-xl border border-dashed border-zinc-700 hover:border-orange-500/40 text-zinc-500 hover:text-zinc-400 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2 text-sm"
+                  >
+                    <FileUp className="w-4 h-4" />
+                    {parseStatus === "parsing" ? "Extracting text…" : "Upload PDF or DOCX"}
+                  </button>
+                )}
+                {parseStatus === "error" && (
+                  <p className="mt-1.5 text-xs text-red-400 text-center">{parseError}</p>
+                )}
+                {parseStatus !== "done" && (
+                  <p className="mt-1.5 text-center text-zinc-700 text-xs">or paste below</p>
+                )}
+              </div>
+
               <div className="relative">
                 <textarea
                   value={cvText}
-                  onChange={(e) => setCvText(e.target.value)}
+                  onChange={(e) => { setCvText(e.target.value); if (uploadedFile) setUploadedFile(null); }}
                   placeholder="Paste your CV content here — work experience, skills, education, objective statement... all of it."
                   className="w-full h-72 p-5 rounded-2xl bg-zinc-900 border border-zinc-800 text-zinc-100 placeholder-zinc-600 resize-none focus:outline-none focus:border-orange-500/50 focus:ring-1 focus:ring-orange-500/20 transition-colors text-sm leading-relaxed"
                 />

@@ -115,6 +115,28 @@ export default function Home() {
     }
   };
 
+  const parsePDFInBrowser = async (file: File): Promise<string> => {
+    const pdfjsLib = await import("pdfjs-dist");
+    // Load worker from CDN matching the installed version — avoids bundling the worker (~1 MB)
+    pdfjsLib.GlobalWorkerOptions.workerSrc =
+      `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
+
+    const arrayBuffer = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
+
+    const pages: string[] = [];
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      const pageText = content.items
+        .map((item) => ("str" in item ? item.str : ""))
+        .join(" ");
+      pages.push(pageText);
+    }
+
+    return pages.join("\n");
+  };
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -123,14 +145,32 @@ export default function Home() {
     setParseStatus("parsing");
     setParseError("");
 
-    const formData = new FormData();
-    formData.append("file", file);
+    const name = file.name.toLowerCase();
 
     try {
-      const res = await fetch("/api/parse-file", { method: "POST", body: formData });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to parse file");
-      setCvText(data.text);
+      let text = "";
+
+      if (name.endsWith(".pdf") || file.type === "application/pdf") {
+        // Parse PDF entirely in the browser — PDF.js was built for this
+        text = await parsePDFInBrowser(file);
+      } else if (name.endsWith(".doc") && !name.endsWith(".docx")) {
+        throw new Error("Legacy .doc format is not supported. Please save the file as .docx and try again.");
+      } else {
+        // DOCX → server-side with mammoth (pure JS, works on Vercel)
+        const formData = new FormData();
+        formData.append("file", file);
+        const res = await fetch("/api/parse-file", { method: "POST", body: formData });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Failed to parse file");
+        text = data.text;
+      }
+
+      const trimmed = text.trim();
+      if (trimmed.length < 50) {
+        throw new Error("Could not extract enough text from the file. Make sure it contains selectable text (not a scanned image).");
+      }
+
+      setCvText(trimmed.slice(0, 15000));
       setParseStatus("done");
     } catch (err) {
       setParseStatus("error");

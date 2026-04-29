@@ -1,4 +1,7 @@
 # Roast My CV 🔥
+<p align="center">
+  <img src="images/roast-my-cv.gif" alt="Roast My CV Demo" width="100%" />
+</p>
 
 Roast My CV is a bold, AI-powered application designed to transform the monotonous task of resume reviewing into an entertaining and highly productive experience.
 
